@@ -40,10 +40,15 @@ jobs:
           docker tag chaoscanary:${{ github.sha }} ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
           docker push ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
 
-      - name: Set up Kind
-        uses: engineerd/setup-kind@v0.6.0
-        with:
-          version: v0.19.0
+      - name: Install kind binary
+        run: |
+          curl -Lo kind "https://kind.sigs.k8s.io/dl/v0.19.0/kind-linux-amd64"
+          chmod +x kind
+          sudo mv kind /usr/local/bin/
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name chaos-canary-ci
 
       - name: Install runner prerequisites
         run: |
