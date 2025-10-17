@@ -7,10 +7,32 @@ PROM_LOCAL_PORT=9090
 THRESHOLD=0.2
 CANARY_POD_LABEL='role=canary'
 
+PF_PID=0
+
+cleanup() {
+  if [ -n "${PF_PID:-}" ] && kill -0 ${PF_PID} >/dev/null 2>&1; then
+    kill ${PF_PID} >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 echo "Port-forwarding Prometheus service to localhost:${PROM_LOCAL_PORT}"
 kubectl -n ${NAMESPACE} port-forward svc/${PROM_SVC} ${PROM_LOCAL_PORT}:9090 >/dev/null 2>&1 &
 PF_PID=$!
-sleep 2
+
+echo "Waiting for Prometheus to be ready on localhost:${PROM_LOCAL_PORT}..."
+READY=0
+for i in $(seq 1 20); do
+  if curl -sSf "http://localhost:${PROM_LOCAL_PORT}/-/ready" >/dev/null 2>&1; then
+    READY=1
+    echo "Prometheus is ready"
+    break
+  fi
+  sleep 1
+done
+if [ ${READY} -ne 1 ]; then
+  echo "Prometheus did not report ready; continuing but the query may not have data yet"
+fi
 
 echo "Enabling failure mode on canary pod"
 CANARY_POD=$(kubectl -n ${NAMESPACE} get pods -l ${CANARY_POD_LABEL} -o jsonpath='{.items[0].metadata.name}')
@@ -19,21 +41,36 @@ kubectl -n ${NAMESPACE} exec ${CANARY_POD} -- \
   -d '{"enabled": true, "error_rate": 0.5, "latency_seconds": 0.1}' \
   http://127.0.0.1:5000/failure || true
 
-echo "Waiting 5s for Prometheus to scrape metrics"
-sleep 5
+echo "Waiting for Prometheus to scrape metrics (allowing additional time)"
+sleep 12
 
 PROM_QUERY='sum(rate(app_errors_total[30s])) / sum(rate(app_requests_total[30s]))'
 echo "Running PromQL: ${PROM_QUERY}"
-ENC_QUERY=$(python3 - <<'PY'
+
+ENC_QUERY=$(python3 - <<PY
 import urllib.parse
-q='''%s''' % "${PROM_QUERY}"
+q = """%s""" % ("${PROM_QUERY}",)
 print(urllib.parse.quote(q))
 PY
 )
-RESULT=$(curl -s "http://localhost:${PROM_LOCAL_PORT}/api/v1/query?query=${ENC_QUERY}" | jq -r '.data.result[0].value[1] // "0"')
+
+RESULT="0"
+for i in $(seq 1 6); do
+  RAW=$(curl -s "http://localhost:${PROM_LOCAL_PORT}/api/v1/query?query=${ENC_QUERY}" || true)
+  if [ -n "$RAW" ]; then
+    VAL=$(echo "$RAW" | jq -r '.data.result[0].value[1] // "0"') || VAL="0"
+    if [ "$VAL" != "0" ]; then
+      RESULT="$VAL"
+      break
+    fi
+  fi
+  echo "Prometheus query returned empty; retrying... ($i)"
+  sleep 2
+done
+
 echo "Prometheus reported error rate: ${RESULT}"
 
-kill ${PF_PID} || true
+# cleanup will kill port-forward
 
 awk "BEGIN{ if (${RESULT} > ${THRESHOLD}) exit 0; else exit 1 }"
 RET=$?
