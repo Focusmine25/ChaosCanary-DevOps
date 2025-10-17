@@ -85,7 +85,27 @@ jobs:
 
       - name: Load image into kind
         run: |
-          kind load docker-image chaoscanary:${{ github.sha }}
+          set -euxo pipefail
+          echo "--- docker info ---"
+          docker info || true
+          echo "--- docker images (matching chaoscanary) ---"
+          docker images | grep chaoscanary || true
+          echo "Inspecting image chaoscanary:${{ github.sha }}"
+          docker image inspect chaoscanary:${{ github.sha }} || true
+          echo "Attempting to load image into kind (with retries). Output saved to /tmp/kind_load.log"
+          rm -f /tmp/kind_load.log || true
+          for i in 1 2 3; do
+            if kind load docker-image chaoscanary:${{ github.sha }} 2>&1 | tee -a /tmp/kind_load.log; then
+              echo "kind load succeeded"
+              break
+            else
+              echo "kind load failed (attempt ${i}), tailing log"
+              tail -n 200 /tmp/kind_load.log || true
+              sleep 5
+            fi
+          done
+          echo "--- tail of kind load log ---"
+          tail -n 300 /tmp/kind_load.log || true
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
