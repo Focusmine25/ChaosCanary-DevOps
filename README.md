@@ -1,5 +1,8 @@
 # Chaos Canary — DevOps Showcase
 
+[![CI](https://github.com/Focusmine25/ChaosCanary-DevOps/actions/workflows/ci.yml/badge.svg)](https://github.com/Focusmine25/ChaosCanary-DevOps/actions)
+[![Canary CI](https://github.com/Focusmine25/ChaosCanary-DevOps/actions/workflows/canary-ci.yml/badge.svg)](https://github.com/Focusmine25/ChaosCanary-DevOps/actions)
+
 This repository is a DevOps showcase: a small Python/Flask microservice with a reproducible CI/CD pipeline, observability, and a canary + chaos engineering demo.
 
 What you'll find here
