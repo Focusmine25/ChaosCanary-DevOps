@@ -1,0 +1,31 @@
+{
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Request rate (req/s)",
+      "targets": [
+        {"expr": "sum(rate(app_requests_total[1m]))", "legendFormat": "req/s"}
+      ],
+      "id": 1
+    },
+    {
+      "type": "graph",
+      "title": "Error rate",
+      "targets": [
+        {"expr": "sum(rate(app_errors_total[1m])) / sum(rate(app_requests_total[1m]))", "legendFormat": "error_rate"}
+      ],
+      "id": 2
+    },
+    {
+      "type": "graph",
+      "title": "p95 latency (s)",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(app_request_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p95"}
+      ],
+      "id": 3
+    }
+  ],
+  "schemaVersion": 16,
+  "title": "Chaos Canary Overview"
+}

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-app
+  namespace: chaos-canary
+  labels:
+    app: chaos-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: chaos-app
+  template:
+    metadata:
+      labels:
+        app: chaos-app
+    spec:
+      containers:
+        - name: app
+          image: chaoscanary/app:latest
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5

@@ -1,0 +1,176 @@
+name: Canary CI
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  canary-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t chaoscanary:${{ github.sha }} -f docker/Dockerfile .
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push image to GHCR
+        run: |
+          IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/chaoscanary:${{ github.sha }}
+          docker tag chaoscanary:${{ github.sha }} ${IMAGE_TAG}
+          docker push ${IMAGE_TAG}
+          # also push a 'latest' tag for convenience
+          docker tag chaoscanary:${{ github.sha }} ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
+          docker push ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
+
+      - name: Set up Kind
+        uses: engineerd/setup-kind@v0.6.0
+        with:
+          version: v0.19.0
+
+      - name: Install runner prerequisites
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Load image into kind
+        run: |
+          kind load docker-image chaoscanary:${{ github.sha }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: '1.27.0'
+
+      - name: Create namespace
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+
+      - name: Deploy Prometheus
+        run: |
+          kubectl apply -f k8s/prometheus-configmap.yaml
+          kubectl apply -f k8s/prometheus-deployment.yaml
+          kubectl apply -f k8s/prometheus-service.yaml
+          kubectl -n chaos-canary rollout status deployment/prometheus --timeout=120s
+
+      - name: Deploy stable (3 replicas)
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: chaos-app-stable
+            namespace: chaos-canary
+            labels:
+              app: chaos-app
+              role: stable
+          spec:
+            replicas: 3
+            selector:
+              matchLabels:
+                app: chaos-app
+                role: stable
+            template:
+              metadata:
+                labels:
+                  app: chaos-app
+                  role: stable
+              spec:
+                containers:
+                - name: app
+                  image: chaoscanary:${{ github.sha }}
+                  ports:
+                  - containerPort: 5000
+          EOF
+
+      - name: Deploy service
+        run: |
+          kubectl apply -f k8s/service.yaml
+
+      - name: Wait for stable ready
+        run: |
+          kubectl -n chaos-canary rollout status deployment/chaos-app-stable --timeout=120s
+
+      - name: Deploy canary (1 replica)
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: chaos-app-canary
+            namespace: chaos-canary
+            labels:
+              app: chaos-app
+              role: canary
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: chaos-app
+                role: canary
+            template:
+              metadata:
+                labels:
+                  app: chaos-app
+                  role: canary
+              spec:
+                containers:
+                - name: app
+                  image: chaoscanary:${{ github.sha }}
+                  ports:
+                  - containerPort: 5000
+          EOF
+
+      - name: Wait for canary ready
+        run: |
+          kubectl -n chaos-canary rollout status deployment/chaos-app-canary --timeout=120s
+
+      - name: Run Prometheus-backed canary verification and rollback script
+        run: |
+          chmod +x ci/verify_canary_prometheus.sh
+          ci/verify_canary_prometheus.sh
+
+      - name: Deploy Grafana
+        run: |
+          kubectl apply -f k8s/grafana-configmaps.yaml
+          kubectl apply -f k8s/grafana-deployment.yaml
+          kubectl apply -f k8s/grafana-service.yaml
+          kubectl -n chaos-canary rollout status deployment/grafana --timeout=120s
+
+      - name: Capture Grafana dashboard screenshot
+        if: success()
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Port-forward grafana and capture
+        if: success()
+        run: |
+          kubectl -n chaos-canary port-forward svc/grafana 3000:3000 >/dev/null 2>&1 &
+          PF=$!
+          sleep 5
+          npm install puppeteer
+          node ci/capture_dashboard.js http://localhost:3000/d/chaoscanary-overview/chaos-canary-overview grafana-dashboard.png
+          kill $PF || true
+
+      - name: Upload Grafana screenshot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grafana-dashboard
+          path: grafana-dashboard.png

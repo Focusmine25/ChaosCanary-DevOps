@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: chaos-canary
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: chaos-canary
+data:
+  chaoscanary-dashboard.json: |
+    {
+      "annotations": {"list": []},
+      "panels": [],
+      "schemaVersion": 16,
+      "title": "Chaos Canary Overview"
+    }

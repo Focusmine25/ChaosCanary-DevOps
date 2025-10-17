@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: chaos-app-rollout
+  namespace: chaos-canary
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: chaos-app
+  template:
+    metadata:
+      labels:
+        app: chaos-app
+    spec:
+      containers:
+        - name: app
+          image: chaoscanary/app:latest
+          ports:
+            - containerPort: 5000
+  strategy:
+    canary:
+      steps:
+        - setWeight: 10
+        - pause: {duration: 30s}
+        - setWeight: 50
+        - pause: {duration: 30s}
+
+# NOTE: This Rollout requires Argo Rollouts controller. If you don't have Argo,
+# you can reproduce canary behavior by creating multiple Deployments and
+# adjusting traffic (or use a simple K8s deployment and manually scale).
