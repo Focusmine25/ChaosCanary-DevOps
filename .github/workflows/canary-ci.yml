@@ -33,16 +33,22 @@ jobs:
 
       - name: Tag and push image to GHCR
         run: |
-          set -e
+          set -euxo pipefail
           IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/chaoscanary:${{ github.sha }}
           docker tag chaoscanary:${{ github.sha }} ${IMAGE_TAG}
-          echo "Pushing image ${IMAGE_TAG} to GHCR (with retries)"
+          echo "--- docker info ---"
+          docker info || true
+          echo "--- docker images (matching chaoscanary) ---"
+          docker images | grep chaoscanary || true
+          echo "Pushing image ${IMAGE_TAG} to GHCR (with retries). Output will be saved to /tmp/docker_push.log"
+          rm -f /tmp/docker_push.log || true
           for i in 1 2 3; do
-            if docker push ${IMAGE_TAG}; then
+            if docker push ${IMAGE_TAG} 2>&1 | tee -a /tmp/docker_push.log; then
               echo "Pushed ${IMAGE_TAG}"
               break
             else
               echo "docker push failed (attempt ${i}), retrying in 5s..."
+              tail -n 200 /tmp/docker_push.log || true
               sleep 5
             fi
           done
@@ -50,14 +56,17 @@ jobs:
           LATEST_TAG=ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
           docker tag chaoscanary:${{ github.sha }} ${LATEST_TAG}
           for i in 1 2 3; do
-            if docker push ${LATEST_TAG}; then
+            if docker push ${LATEST_TAG} 2>&1 | tee -a /tmp/docker_push.log; then
               echo "Pushed ${LATEST_TAG}"
               break
             else
               echo "docker push latest failed (attempt ${i}), retrying in 5s..."
+              tail -n 200 /tmp/docker_push.log || true
               sleep 5
             fi
           done
+          echo "--- tail of docker push log ---"
+          tail -n 300 /tmp/docker_push.log || true
 
       - name: Install kind binary
         run: |
