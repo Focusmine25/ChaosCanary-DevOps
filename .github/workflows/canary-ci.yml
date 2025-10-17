@@ -33,12 +33,31 @@ jobs:
 
       - name: Tag and push image to GHCR
         run: |
+          set -e
           IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/chaoscanary:${{ github.sha }}
           docker tag chaoscanary:${{ github.sha }} ${IMAGE_TAG}
-          docker push ${IMAGE_TAG}
+          echo "Pushing image ${IMAGE_TAG} to GHCR (with retries)"
+          for i in 1 2 3; do
+            if docker push ${IMAGE_TAG}; then
+              echo "Pushed ${IMAGE_TAG}"
+              break
+            else
+              echo "docker push failed (attempt ${i}), retrying in 5s..."
+              sleep 5
+            fi
+          done
           # also push a 'latest' tag for convenience
-          docker tag chaoscanary:${{ github.sha }} ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
-          docker push ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
+          LATEST_TAG=ghcr.io/${{ github.repository_owner }}/chaoscanary:latest
+          docker tag chaoscanary:${{ github.sha }} ${LATEST_TAG}
+          for i in 1 2 3; do
+            if docker push ${LATEST_TAG}; then
+              echo "Pushed ${LATEST_TAG}"
+              break
+            else
+              echo "docker push latest failed (attempt ${i}), retrying in 5s..."
+              sleep 5
+            fi
+          done
 
       - name: Install kind binary
         run: |
